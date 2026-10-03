@@ -12,7 +12,49 @@ from unittest.mock import patch
 import numpy as np
 
 from txtai.embeddings import Embeddings, Reducer
+from txtai.embeddings.search.hybrid import LogOdds
 from txtai.serialize import SerializeFactory
+
+
+class TestEmbeddingsHybrid(unittest.TestCase):
+    """
+    Hybrid score fusion tests without an embeddings model.
+    """
+
+    def testCalibration(self):
+        """
+        Test calibration defaults, positive-score filtering and upper median.
+        """
+
+        fusion = LogOdds()
+        cases = [
+            ([], 0.0, 1.0),
+            ([0.0, -0.5], 0.0, 1.0),
+            ([0.5], 0.5, 1.0),
+            ([0.5] * 4, 0.5, 1.0),
+            ([0.25, 0.5, 0.75], 0.5, 24**0.5),
+            ([-0.5, 0.0, 0.25, 0.5, 0.75], 0.5, 24**0.5),
+            ([0.25, 0.75], 0.75, 4.0),
+        ]
+        for raw, median, alpha in cases:
+            with self.subTest(raw=raw):
+                original = raw.copy()
+                actual = fusion.calibrate(raw)
+                self.assertEqual(actual[0], median)
+                self.assertAlmostEqual(actual[1], alpha)
+                self.assertEqual(raw, original)
+
+    def testFusion(self):
+        """
+        Test ranking with overlapping, dense-only and sparse-only candidates.
+        """
+
+        vectors = ([(0, 0.2), (1, 0.4), (2, 0.6)], [(0, 0.8), (1, 0.5), (3, 0.6)])
+        results = LogOdds()(vectors, [0.5, 0.5], 3)
+
+        self.assertEqual([uid for uid, _ in results], [2, 3, 0])
+        for (_, score), expected in zip(results, [0.6484817966039822, 0.5505102572168218, 0.5285271704625175]):
+            self.assertAlmostEqual(score, expected)
 
 
 class TestEmbeddings(unittest.TestCase):
